@@ -41,6 +41,9 @@ Inspired from : https://github.com/aws-samples/amazon-route-53-resolver-firewall
 
 With the aws-cli : ``` aws --region <region> cloudformation create-stack --stack-name AutoFetchDomainStack --capabilities CAPABILITY_NAMED_IAM --template-body file://./AutoFetchDomainContainerStack.cfn.yaml --parameters ParameterKey=ParamS3DomainListBucketName,ParameterValue=<Bucket-name> ParameterKey=ParamFirewallDomainListName,ParameterValue=<Domain-list-name> ParameterKey=ParamScheduleRate,ParameterValue=<Rate in minutes> ParameterKey=ParamLambdaImageURI,ParameterValue=<image uri including tag>```
 
+**To delete :**
+With the aws-cli : ```aws s3 rm s3://<ParamS3DomainListBucketName> --recursive && aws --region <region> cloudformation delete-stack --stack-name AutoFetchDomainStack```
+
 **Note :**
 - The retention policy on the "ParamS3DomainListBucketName" that will be created is set to 24h
 - The log groups of the deployed lambdas are set to retain log for a duration of 1 month
