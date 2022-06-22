@@ -1,0 +1,317 @@
+Parameters:
+  ParamFirewallDomainListName:
+    Type: String
+    Description: Please enter the Firewall Domain List Name <String> to create and update
+  ParamS3DomainListBucketName:
+    Type: String
+    Description: Please enter the bucketname <String> for the s3 bucket that will be used to store the domains that will be fetched
+  ParamScheduleRate:
+    Type: String
+    Description: Please enter the rate in minutes <Number> at which the domains will be fetched
+  ParamLambdaImageURI:
+    Type: String
+    Description: Please enter the name of the image URI <string> that will be used
+Resources:
+  LambdaRoleForFetchLambda:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Lambda-Role
+      RoleName: LambdaRoleForFetchLambda
+  DomainListBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName:
+        Ref: ParamS3DomainListBucketName
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  FetchLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ImageUri:
+          Ref: ParamLambdaImageURI
+      Role:
+        Fn::GetAtt:
+          - LambdaRoleForFetchLambda
+          - Arn
+      Environment:
+        Variables:
+          s3Prefix:
+            Ref: ParamS3DomainListBucketName
+          region:
+            Ref: AWS::Region
+      FunctionName: FetchLambda
+      PackageType: Image
+      Timeout: 60
+  Route53ResolverCustomDomainList:
+    Type: AWS::Route53Resolver::FirewallDomainList
+    Properties:
+      Name:
+        Ref: ParamFirewallDomainListName
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/FetchLambda
+      RetentionInDays: 30
+  AutoFetchSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Scheduled rules to trigger FetchLambda to update dnsfirewall
+      Name: AutoFetchSchedule
+      ScheduleExpression:
+        Fn::Join:
+          - ""
+          - - rate(
+            - Ref: ParamScheduleRate
+            - " minutes)"
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::GetAtt:
+              - FetchLambda
+              - Arn
+          Id: FetchLambda
+          Input: '{"eventDetail":"Scheduled event"}'
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - FetchLambda
+          - Arn
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+          - AutoFetchSchedule
+          - Arn
+  UpdateDNSFWStackLambdaFWRoleForLambdaUpdateDnsFwEDFC1518:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Lambda-Role
+      RoleName: LambdaFWRoleForLambdaUpdateDnsFw
+  UpdateDNSFWStackLambdaAutoUpdateDnsFwDAA31F9E:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |-
+          // Package
+          const AWS = require('aws-sdk');
+
+          // Const 
+          const FirewallDomainListId = process.env.domain_list_id
+          const region = process.env.region
+
+          // AWS Object
+          const route53Resolver = new AWS.Route53Resolver({ "region": region });
+
+          async function update_route53_domains(filekey, bucketname) {
+            let route53Resolver_params = {
+              DomainFileUrl: "s3://"+bucketname+"/" + filekey,
+              FirewallDomainListId: FirewallDomainListId,
+              Operation: "REPLACE"
+            }
+            await route53Resolver.importFirewallDomains(route53Resolver_params).promise()
+            console.log("[INFO] DNS Firewall of id : " + FirewallDomainListId + " updated with file " + filekey)
+          }
+
+          exports.handler = async (event) => {
+            let filekey = event.detail.object.key
+            let bucketname = event.detail.bucket.name
+            await update_route53_domains(filekey, bucketname)
+
+          };
+      Role:
+        Fn::GetAtt:
+          - UpdateDNSFWStackLambdaFWRoleForLambdaUpdateDnsFwEDFC1518
+          - Arn
+      Environment:
+        Variables:
+          domain_list_id:
+            Fn::GetAtt:
+              - Route53ResolverCustomDomainList
+              - Id
+          region:
+            Ref: AWS::Region
+      FunctionName: LambdaAutoUpdateDnsFw
+      Handler: index.handler
+      Runtime: nodejs14.x
+  UpdateDNSFWStackLambdaLogGroupB21E4462:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/LambdaAutoUpdateDnsFw
+      RetentionInDays: 30
+  UpdateDNSFWStackUpdateDnsFWRuleC7786E69:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: ""
+      EventPattern:
+        source:
+          - aws.s3
+        account:
+          - Ref: AWS::AccountId
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - Ref: ParamS3DomainListBucketName
+      Name: UpdateDnsFWRule
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::GetAtt:
+              - UpdateDNSFWStackLambdaAutoUpdateDnsFwDAA31F9E
+              - Arn
+          Id: LambdaUpdateDnsFw
+  UpdateDNSFWStackLambdaPermission6E98C382:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - UpdateDNSFWStackLambdaAutoUpdateDnsFwDAA31F9E
+          - Arn
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+          - UpdateDNSFWStackUpdateDnsFWRuleC7786E69
+          - Arn
+  UpdateDNSFWStackPolicylambdaFW73FAD557:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              Fn::Join:
+                - ""
+                - - "arn:aws:logs:"
+                  - Ref: AWS::Region
+                  - ":"
+                  - Ref: AWS::AccountId
+                  - :*
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              Fn::Join:
+                - ""
+                - - Fn::GetAtt:
+                      - DomainListBucket
+                      - Arn
+                  - /*
+          - Effect: Allow
+            Action:
+              - route53resolver:ImportFirewallDomains
+            Resource:
+              Fn::Join:
+                - ""
+                - - "arn:aws:route53resolver:"
+                  - Ref: AWS::Region
+                  - ":"
+                  - Ref: AWS::AccountId
+                  - :firewall-domain-list/
+                  - Fn::GetAtt:
+                      - Route53ResolverCustomDomainList
+                      - Id
+      PolicyName: PolicylambdaFW
+      Roles:
+        - Ref: UpdateDNSFWStackLambdaFWRoleForLambdaUpdateDnsFwEDFC1518
+  DomainListBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: ParamS3DomainListBucketName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Bucketpolicy-1
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt:
+                  - LambdaRoleForFetchLambda
+                  - Arn
+            Action:
+              - s3:PutObject
+            Resource:
+              Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: ParamS3DomainListBucketName
+                  - /*
+          - Sid: Bucketpolicy-2
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt:
+                  - UpdateDNSFWStackLambdaFWRoleForLambdaUpdateDnsFwEDFC1518
+                  - Arn
+            Action:
+              - s3:GetObject
+            Resource:
+              Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: ParamS3DomainListBucketName
+                  - /*
+  Policylambda:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              Fn::Join:
+                - ""
+                - - "arn:aws:logs:"
+                  - Ref: AWS::Region
+                  - ":"
+                  - Ref: AWS::AccountId
+                  - :*
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource:
+              Fn::Join:
+                - ""
+                - - Fn::GetAtt:
+                      - DomainListBucket
+                      - Arn
+                  - /*
+      PolicyName: Sample-PolicyForAutomation
+      Roles:
+        - Ref: LambdaRoleForFetchLambda
+
