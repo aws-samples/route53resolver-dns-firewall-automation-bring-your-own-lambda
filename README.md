@@ -47,6 +47,7 @@ With the aws-cli : ```aws s3 rm s3://<ParamS3DomainListBucketName> --recursive &
 **Note :**
 - The retention policy on the "ParamS3DomainListBucketName" that will be created is set to 24h
 - The log groups of the deployed lambdas are set to retain log for a duration of 1 month
+- You can monitor the lambda executions from the cloudwatch logs and the lambda "monitor" pannel
 
 ## Security
 
